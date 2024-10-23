@@ -7,6 +7,10 @@ import plotly.graph_objs as go
 from collections import deque
 from flask import Flask, request
 import pandas as pd  # Import pandas
+import re
+import os
+
+
 
 # Initialize the Flask server
 server = Flask(__name__)
@@ -126,21 +130,34 @@ def update_graph(_counter):
     State("input-box", "value"),
     State("radio-items", "value")
 )
-def save_data(n_clicks, recording_state, participant_number,radio_selection):
+def save_data(n_clicks, recording_state, participant_number, radio_selection):
     if n_clicks > 0 and not recording_state and participant_number:
+        # Validate and sanitize inputs
+        if not re.match("^[a-zA-Z0-9_-]{1,20}$", participant_number):
+            # Handle invalid participant_number
+            return 'Invalid participant number'
+        if not re.match("^[a-zA-Z0-9_-]+$", radio_selection):
+            return 'Invalid radio selection'
+
         df = pd.DataFrame({
             'time': list(time),
             'accel_x': list(accel_x),
             'accel_y': list(accel_y),
             'accel_z': list(accel_z)
         })
+        
+        # Generate a unique filename
         filename = f"{participant_number}_{radio_selection}_{datetime.now().strftime('%b%d_%H%Mhr')}.csv"
+        if os.path.exists(filename):
+            filename = f"{participant_number}_{radio_selection}_{datetime.now().strftime('%b%d_%H%Mhr')}_{uuid.uuid4().hex}.csv"
+        
         df.to_csv(filename, index=False)
         return f'File saved as: {filename}'
+    
     if not participant_number:
-        return f'Participant number not entered'
+        return 'Participant number not entered'
     else:
-        return f'File not saved'
+        return 'File not saved'
     
 
 @server.route("/data", methods=["POST"])
