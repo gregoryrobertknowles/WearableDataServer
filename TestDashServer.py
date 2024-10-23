@@ -32,6 +32,7 @@ app.layout = html.Div(children=[
         html.Label('Participant Number:'),
         dcc.Input(id='input-box', type='text'),
         html.Br(),  # New line added here
+        html.Br(),
         html.Label('Select an option:'),
         dcc.RadioItems(
             id='radio-items',
@@ -42,19 +43,26 @@ app.layout = html.Div(children=[
             ],
             value='BASMI'  # Default value
         ),
+    
+        html.Br(),
         html.Button('Submit', id='submit-button'),
-        html.Div(id='output-div'),
-        html.Label('Phone data:'),
+        html.Div(id='output-div1'),
+        html.Br(),
+        
+        html.H2('Phone data:'),
         dcc.Graph(id="live_graph"),
         dcc.Interval(id="counter", interval=UPDATE_FREQ_MS),
         html.Button("Start Recording", id="record_button", n_clicks=0),
         html.Button("Save Recording", id="save_button", n_clicks=0),
-        dcc.Store(id="recording_state", data=False)
+        dcc.Store(id="recording_state", data=False),
+        html.Br(),
+        html.Br(),
+        html.Div(id='output-div2'),
     ])
 ])
 
 @app.callback(
-    Output('output-div', 'children'),
+    Output('output-div1', 'children'),
     Input('submit-button', 'n_clicks'),
     Input('input-box', 'value')
 )
@@ -104,20 +112,21 @@ def update_graph(_counter):
     ):  #  cannot adjust plot ranges until there is at least one data point
         graph["layout"]["xaxis"]["range"] = [min(time), max(time)]
         graph["layout"]["yaxis"]["range"] = [
-            min(accel_x + accel_y + accel_z),
-            max(accel_x + accel_y + accel_z),
+            min(min(accel_x), min(accel_y), min(accel_z)),
+            max(max(accel_x), max(accel_y), max(accel_z)),
         ]
 
     return graph
 
 
 @app.callback(
-    Output("dummy-output", "children"),
+    Output('output-div2', 'children'),
     Input("save_button", "n_clicks"),
     State("recording_state", "data"),
-    State("input-box", "value")
+    State("input-box", "value"),
+    State("radio-items", "value")
 )
-def save_data(n_clicks, recording_state, participant_number):
+def save_data(n_clicks, recording_state, participant_number,radio_selection):
     if n_clicks > 0 and not recording_state and participant_number:
         df = pd.DataFrame({
             'time': list(time),
@@ -125,10 +134,14 @@ def save_data(n_clicks, recording_state, participant_number):
             'accel_y': list(accel_y),
             'accel_z': list(accel_z)
         })
-        filename = f"data_{participant_number}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        filename = f"{participant_number}_{radio_selection}_{datetime.now().strftime('%b%d_%H%Mhr')}.csv"
         df.to_csv(filename, index=False)
-        print(f"Data saved to {filename}")
-    return ""
+        return f'File saved as: {filename}'
+    if not participant_number:
+        return f'Participant number not entered'
+    else:
+        return f'File not saved'
+    
 
 @server.route("/data", methods=["POST"])
 def data():  # listens to the data streamed from the sensor logger
@@ -142,9 +155,10 @@ def data():  # listens to the data streamed from the sensor logger
             ):  #  modify to access different sensors
                 ts = datetime.fromtimestamp(d["time"] / 1000000000)
                 if len(time) == 0 or ts > time[-1]:
-                    time.append(ts)
+                    
                     # modify the following based on which sensor is accessed, log the raw json for guidance
                     if recording_state:  # Check recording state
+                        time.append(ts)
                         accel_x.append(d["values"]["x"])
                         accel_y.append(d["values"]["y"])
                         accel_z.append(d["values"]["z"])
