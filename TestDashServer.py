@@ -22,12 +22,31 @@ MAX_DATA_POINTS = 1000
 UPDATE_FREQ_MS = 100
 
 time = deque(maxlen=MAX_DATA_POINTS)
+watchtime = deque(maxlen=MAX_DATA_POINTS)
 accel_x = deque(maxlen=MAX_DATA_POINTS)
 accel_y = deque(maxlen=MAX_DATA_POINTS)
 accel_z = deque(maxlen=MAX_DATA_POINTS)
 
+#wristmotion values
+wrist_rotation_rate_x = deque(maxlen=MAX_DATA_POINTS)
+wrist_rotation_rate_y = deque(maxlen=MAX_DATA_POINTS)
+wrist_rotation_rate_z = deque(maxlen=MAX_DATA_POINTS)
+wrist_gravity_x = deque(maxlen=MAX_DATA_POINTS)
+wrist_gravity_y = deque(maxlen=MAX_DATA_POINTS)
+wrist_gravity_z = deque(maxlen=MAX_DATA_POINTS)
+wrist_acceleration_x = deque(maxlen=MAX_DATA_POINTS)
+wrist_acceleration_y = deque(maxlen=MAX_DATA_POINTS)
+wrist_acceleration_z = deque(maxlen=MAX_DATA_POINTS)
+wrist_quaternion_w = deque(maxlen=MAX_DATA_POINTS)
+wrist_quaternion_x = deque(maxlen=MAX_DATA_POINTS)
+wrist_quaternion_y = deque(maxlen=MAX_DATA_POINTS)
+wrist_quaternion_z = deque(maxlen=MAX_DATA_POINTS)
+
+
+
 # Global variable to store recording state
-recording_state = False
+recording_state = True #true for debugging, set to false when not recording
+firstmsgRx = False
 
 # Define the layout of the Dash app
 app.layout = html.Div(children=[
@@ -56,6 +75,11 @@ app.layout = html.Div(children=[
         html.H2('Phone data:'),
         dcc.Graph(id="live_graph"),
         dcc.Interval(id="counter", interval=UPDATE_FREQ_MS),
+
+        html.H2('Watch data:'),  # New section for watch data
+        dcc.Graph(id="live_graph_watch"),
+        #dcc.Interval(id="counter_watch", interval=UPDATE_FREQ_MS),
+
         html.Button("Start Recording", id="record_button", n_clicks=0),
         html.Button("Save Recording", id="save_button", n_clicks=0),
         dcc.Store(id="recording_state", data=False),
@@ -75,7 +99,7 @@ def update_output(n_clicks, value):
         # Assign the input value to a variable
         input_value = value
         return f'You have entered: {input_value}'
-    return ''
+    return 'Participant number not entered'
 
 @app.callback(
     Output("recording_state", "data"),
@@ -122,6 +146,37 @@ def update_graph(_counter):
 
     return graph
 
+@app.callback(Output("live_graph_watch", "figure"), Input("counter", "n_intervals"))
+def update_watch_graph(_counter):
+    global recording_state
+    if not recording_state:
+        return dash.no_update
+    data = [
+    go.Scatter(x=list(watchtime), y=list(d), name=name)
+    for d, name in zip(
+        [wrist_acceleration_x, wrist_acceleration_y, wrist_acceleration_z],
+        ["Wrist X", "Wrist Y", "Wrist Z"]
+        )
+    ]
+
+    graph = {
+        "data": data,
+        "layout": go.Layout(
+            {
+                "xaxis": {"type": "date"},
+                "yaxis": {"title": "Wrist Acceleration ms<sup>-2</sup>"},
+            }
+        ),
+    }
+    if len(time) > 0:
+        graph["layout"]["xaxis"]["range"] = [min(watchtime), max(watchtime)]
+        graph["layout"]["yaxis"]["range"] = [
+            min(min(wrist_acceleration_x), min(wrist_acceleration_y), min(wrist_acceleration_z)),
+            max(max(wrist_acceleration_x), max(wrist_acceleration_y), max(wrist_acceleration_z)),
+        ]
+
+    return graph
+
 
 @app.callback(
     Output('output-div2', 'children'),
@@ -162,11 +217,26 @@ def save_data(n_clicks, recording_state, participant_number, radio_selection):
 
 @server.route("/data", methods=["POST"])
 def data():  # listens to the data streamed from the sensor logger
-    global recording_state
+    global recording_state, firstmsgRx
     if str(request.method) == "POST":
-        #print(f'received data: {request.data}')
+        try:
+            data = json.loads(request.data)
+        except json.JSONDecodeError:
+            return "Invalid JSON data", 400
         data = json.loads(request.data)
+        """ if not firstmsgRx:
+            print("First message received")
+            print(json.dumps(data, indent=4))
+            firstmsgRx = True
+            with open("first_message.txt", "w") as f:
+                f.write(json.dumps(data, indent=4)) """
+        # Print the entire JSON payload
+        #print(json.dumps(data, indent=4))
+        
         for d in data['payload']:
+            #print('processing data:')
+            #print(d.get("name", None))
+
             if (
                 d.get("name", None) == "accelerometer"
             ):  #  modify to access different sensors
@@ -179,7 +249,30 @@ def data():  # listens to the data streamed from the sensor logger
                         accel_x.append(d["values"]["x"])
                         accel_y.append(d["values"]["y"])
                         accel_z.append(d["values"]["z"])
-    return "success"
+                        #print("Phone data received ✅")
+            if d.get("name", None) == "wrist motion":
+                #print("Wrist motion data received ✅")
+                ts = datetime.fromtimestamp(d["time"] / 1000000000)
+                if len(watchtime) == 0 or ts > watchtime[-1]:
+                    #print("Here ❗")
+                    if recording_state:
+                        #print("Wrist motion data processing⏲️")
+                        watchtime.append(ts)
+                        wrist_rotation_rate_x.append(d["values"]["rotationRateX"])
+                        wrist_rotation_rate_y.append(d["values"]["rotationRateY"])
+                        wrist_rotation_rate_z.append(d["values"]["rotationRateZ"])
+                        wrist_gravity_x.append(d["values"]["gravityX"])
+                        wrist_gravity_y.append(d["values"]["gravityY"])
+                        wrist_gravity_z.append(d["values"]["gravityZ"])
+                        wrist_acceleration_x.append(d["values"]["accelerationX"])
+                        wrist_acceleration_y.append(d["values"]["accelerationY"])
+                        wrist_acceleration_z.append(d["values"]["accelerationZ"])
+                        wrist_quaternion_w.append(d["values"]["quaternionW"])
+                        wrist_quaternion_x.append(d["values"]["quaternionX"])
+                        wrist_quaternion_y.append(d["values"]["quaternionY"])
+                        wrist_quaternion_z.append(d["values"]["quaternionZ"])
+                        #print("Wrist motion data received ✅")
+    return "success", 200
 
 # Run the server
 if __name__ == '__main__':
